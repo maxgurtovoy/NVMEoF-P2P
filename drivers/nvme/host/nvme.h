@@ -291,6 +291,7 @@ struct nvme_ctrl {
 	u16 icdoff;
 	u16 maxcmd;
 	int nr_reconnects;
+	bool pi_capable;
 	struct nvmf_ctrl_options *opts;
 
 	struct page *discard_page;
