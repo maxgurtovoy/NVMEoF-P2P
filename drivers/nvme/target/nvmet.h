@@ -145,6 +145,7 @@ struct nvmet_port {
 	bool				enabled;
 	int				inline_data_size;
 	const struct nvmet_fabrics_ops	*tr_ops;
+	bool				pi_enable;
 };
 
 static inline struct nvmet_port *to_nvmet_port(struct config_item *item)
@@ -204,6 +205,7 @@ struct nvmet_ctrl {
 	spinlock_t		error_lock;
 	u64			err_counter;
 	struct nvme_error_slot	slots[NVMET_ERROR_LOG_SLOTS];
+	bool			pi_support;
 };
 
 struct nvmet_subsys_model {
@@ -233,6 +235,7 @@ struct nvmet_subsys {
 	u64			ver;
 	u64			serial;
 	char			*subsysnqn;
+	bool			pi_support;
 
 	struct config_group	group;
 
@@ -284,6 +287,7 @@ struct nvmet_fabrics_ops {
 	unsigned int type;
 	unsigned int msdbd;
 	bool has_keyed_sgls : 1;
+	bool metadata_support : 1;
 	void (*queue_response)(struct nvmet_req *req);
 	int (*add_port)(struct nvmet_port *port);
 	void (*remove_port)(struct nvmet_port *port);
@@ -508,6 +512,19 @@ static inline u32 nvmet_rw_data_len(struct nvmet_req *req)
 {
 	return ((u32)le16_to_cpu(req->cmd->rw.length) + 1) <<
 			req->ns->blksize_shift;
+}
+
+static inline u32 nvmet_rw_md_len(struct nvmet_req *req)
+{
+	return ((u32)le16_to_cpu(req->cmd->rw.length) + 1) *
+			req->ns->metadata_size;
+}
+
+static inline bool nvmet_ns_has_pi(struct nvmet_ns *ns)
+{
+	if (!IS_ENABLED(CONFIG_BLK_DEV_INTEGRITY))
+		return false;
+	return ns->pi_type && ns->metadata_size == sizeof(struct t10_pi_tuple);
 }
 
 static inline u32 nvmet_dsm_len(struct nvmet_req *req)

@@ -197,6 +197,9 @@ static void nvmet_execute_admin_connect(struct nvmet_req *req)
 		goto out;
 	}
 
+	if (ctrl->port->pi_enable)
+		ctrl->pi_support = ctrl->subsys->pi_support;
+
 	uuid_copy(&ctrl->hostid, &d->hostid);
 
 	status = nvmet_install_queue(ctrl, req);
@@ -205,8 +208,9 @@ static void nvmet_execute_admin_connect(struct nvmet_req *req)
 		goto out;
 	}
 
-	pr_info("creating controller %d for subsystem %s for NQN %s.\n",
-		ctrl->cntlid, ctrl->subsys->subsysnqn, ctrl->hostnqn);
+	pr_info("creating controller %d for subsystem %s for NQN %s%s.\n",
+		ctrl->cntlid, ctrl->subsys->subsysnqn, ctrl->hostnqn,
+		ctrl->pi_support ? " T10-PI is enabled" : "");
 	req->cqe->result.u16 = cpu_to_le16(ctrl->cntlid);
 
 out:
