@@ -309,6 +309,7 @@ struct nvmet_req {
 	struct nvmet_cq		*cq;
 	struct nvmet_ns		*ns;
 	struct scatterlist	*sg;
+	struct scatterlist	*md_sg;
 	struct bio_vec		inline_bvec[NVMET_MAX_INLINE_BIOVEC];
 	union {
 		struct {
@@ -322,8 +323,10 @@ struct nvmet_req {
 		} f;
 	};
 	int			sg_cnt;
+	int			md_sg_cnt;
 	/* data length as parsed from the SGL descriptor: */
 	size_t			transfer_len;
+	size_t			md_len;
 
 	struct nvmet_port	*port;
 

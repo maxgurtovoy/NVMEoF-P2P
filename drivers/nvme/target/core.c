@@ -884,8 +884,11 @@ bool nvmet_req_init(struct nvmet_req *req, struct nvmet_cq *cq,
 	req->sq = sq;
 	req->ops = ops;
 	req->sg = NULL;
+	req->md_sg = NULL;
 	req->sg_cnt = 0;
+	req->md_sg_cnt = 0;
 	req->transfer_len = 0;
+	req->md_len = 0;
 	req->cqe->status = 0;
 	req->cqe->sq_head = 0;
 	req->ns = NULL;
@@ -970,9 +973,67 @@ bool nvmet_check_data_len_lte(struct nvmet_req *req, size_t data_len)
 	return true;
 }
 
+void nvmet_req_free_p2pmem_sgls(struct nvmet_req *req)
+{
+	pci_p2pmem_free_sgl(req->p2p_dev, req->sg);
+	if (req->md_sg)
+		pci_p2pmem_free_sgl(req->p2p_dev, req->md_sg);
+}
+
+static int nvmet_req_alloc_p2pmem_sgls(struct nvmet_req *req, int data_len,
+		struct pci_dev *p2p_dev)
+{
+	req->sg = pci_p2pmem_alloc_sgl(p2p_dev, &req->sg_cnt, data_len);
+	if (!req->sg)
+		goto out_err;
+
+	if (req->md_len) {
+		req->md_sg = pci_p2pmem_alloc_sgl(p2p_dev, &req->md_sg_cnt,
+						  req->md_len);
+		if (!req->md_sg)
+			goto out_free_sg;
+	}
+	req->p2p_dev = p2p_dev;
+	return 0;
+
+out_free_sg:
+	pci_p2pmem_free_sgl(p2p_dev, req->sg);
+out_err:
+	return -ENOMEM;
+}
+
+void nvmet_req_free_mem_sgls(struct nvmet_req *req)
+{
+	sgl_free(req->sg);
+	if (req->md_sg)
+		sgl_free(req->md_sg);
+}
+
+static int nvmet_req_alloc_mem_sgls(struct nvmet_req *req, int data_len)
+{
+	req->sg = sgl_alloc(data_len, GFP_KERNEL, &req->sg_cnt);
+	if (unlikely(!req->sg))
+		goto out;
+
+	if (req->md_len) {
+		req->md_sg = sgl_alloc(req->md_len, GFP_KERNEL,
+				       &req->md_sg_cnt);
+		if (unlikely(!req->md_sg))
+			goto out_free;
+	}
+
+	return 0;
+
+out_free:
+	sgl_free(req->sg);
+out:
+	return -ENOMEM;
+}
+
 int nvmet_req_alloc_sgl(struct nvmet_req *req)
 {
 	struct pci_dev *p2p_dev = NULL;
+	int data_len = req->transfer_len - req->md_len;
 
 	if (IS_ENABLED(CONFIG_PCI_P2PDMA)) {
 		if (req->sq->ctrl && req->ns)
@@ -981,37 +1042,32 @@ int nvmet_req_alloc_sgl(struct nvmet_req *req)
 
 		req->p2p_dev = NULL;
 		if (req->sq->qid && p2p_dev) {
-			req->sg = pci_p2pmem_alloc_sgl(p2p_dev, &req->sg_cnt,
-						       req->transfer_len);
-			if (req->sg) {
-				req->p2p_dev = p2p_dev;
+			int ret = nvmet_req_alloc_p2pmem_sgls(req, data_len,
+							      p2p_dev);
+			if (!ret)
 				return 0;
-			}
 		}
-
-		/*
-		 * If no P2P memory was available we fallback to using
-		 * regular memory
-		 */
 	}
 
-	req->sg = sgl_alloc(req->transfer_len, GFP_KERNEL, &req->sg_cnt);
-	if (unlikely(!req->sg))
-		return -ENOMEM;
-
-	return 0;
+	/*
+	 * If no P2P memory was available/enabled we fallback to using regular
+	 * memory.
+	 */
+	return nvmet_req_alloc_mem_sgls(req, data_len);
 }
 EXPORT_SYMBOL_GPL(nvmet_req_alloc_sgl);
 
 void nvmet_req_free_sgl(struct nvmet_req *req)
 {
 	if (req->p2p_dev)
-		pci_p2pmem_free_sgl(req->p2p_dev, req->sg);
+		nvmet_req_free_p2pmem_sgls(req);
 	else
-		sgl_free(req->sg);
+		nvmet_req_free_mem_sgls(req);
 
 	req->sg = NULL;
+	req->md_sg = NULL;
 	req->sg_cnt = 0;
+	req->md_sg_cnt = 0;
 }
 EXPORT_SYMBOL_GPL(nvmet_req_free_sgl);
 
